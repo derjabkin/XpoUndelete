@@ -87,6 +87,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="AnotherMasterObject.cs" />
     <Compile Include="DetailObject.cs" />
     <Compile Include="MasterObject.cs" />
     <Compile Include="Program.cs" />

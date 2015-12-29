@@ -5,6 +5,8 @@ using System;
 using DevExpress.Xpo.Metadata;
 using DevExpress.Xpo.Helpers;
 using System.Diagnostics;
+using System.Reflection;
+using DevExpress.Xpo.Metadata.Helpers;
 
 namespace XpoRecoverDeleted
 {
@@ -21,22 +23,45 @@ namespace XpoRecoverDeleted
             Debug.Assert(GetTotalRowsCount<MasterObject>() == 0 && GetTotalRowsCount<DetailObject>() == 0);
 
             CreateTestObject();
-            Debug.Assert(GetTotalRowsCount<MasterObject>() == 1 && GetTotalRowsCount<DetailObject>() == 3);
 
+            AddDeferredDeletionToIntermediateClasses();
+
+            Debug.Assert(GetTotalRowsCount<MasterObject>() == 1 && GetTotalRowsCount<DetailObject>() == 3);
+            Debug.Assert(GetManyToManyCount() == 3);
             DeleteTestObject();
             Debug.Assert(GetTotalRowsCount<MasterObject>() == 0 && GetTotalRowsCount<DetailObject>() == 0);
+            Debug.Assert(GetManyToManyCount() == 0);
 
             UnDeleteTestObject();
             Debug.Assert(GetTotalRowsCount<MasterObject>() == 1 && GetTotalRowsCount<DetailObject>() == 3);
+            Debug.Assert(GetManyToManyCount() == 3);
+
 
         }
 
+        private static void AddDeferredDeletionToIntermediateClasses()
+        {
+            foreach (var ci in dataLayer.Dictionary.Classes.OfType<IntermediateClassInfo>())
+            {
+                ci.AddAttribute(new DeferredDeletionAttribute(true));
+                new GCRecordField(ci);
+            }
+        }
+
+        private static int GetManyToManyCount()
+        {
+            using (var uow = new UnitOfWork(dataLayer))
+            {
+                var masterObject = uow.Query<MasterObject>().FirstOrDefault();
+                return masterObject != null ? masterObject.AnotherMasters.Count : 0;
+            }
+        }
         private static int GetTotalRowsCount<T>()
         {
             using (var uow = new UnitOfWork(dataLayer))
             {
                 string tableName = uow.GetClassInfo<T>().Table.Name;
-                return (int)uow.ExecuteScalar($"select count(*) from [{tableName}] where GCRecord is null");
+                return (int)uow.ExecuteScalar($"select count(*) from [{tableName}] where {GCRecordField.StaticName} is null");
             }
         }
 
@@ -44,7 +69,7 @@ namespace XpoRecoverDeleted
         {
             using (var uow = new UnitOfWork(dataLayer))
             {
-                uow.ExecuteScalar("Delete from DetailObject;Delete from MasterObject");
+                uow.ExecuteScalar("Delete From MasterObjectMasters_AnotherMasterObjectAnotherMasters;Delete From AnotherMasterObject;Delete from DetailObject;Delete from MasterObject;");
             }
         }
         private static void UnDeleteTestObject()
@@ -82,6 +107,9 @@ namespace XpoRecoverDeleted
                 masterObject.Details.Add(new DetailObject(uow) { Name = "Detail 2" });
                 masterObject.Details.Add(new DetailObject(uow) { Name = "Detail 3" });
 
+                masterObject.AnotherMasters.Add(new AnotherMasterObject(uow) { Name = "Another Master 1" });
+                masterObject.AnotherMasters.Add(new AnotherMasterObject(uow) { Name = "Another Master 2" });
+                masterObject.AnotherMasters.Add(new AnotherMasterObject(uow) { Name = "Another Master 3" });
                 uow.CommitChanges();
             }
         }
@@ -94,16 +122,31 @@ namespace XpoRecoverDeleted
         private static void UndeleteObject(XPBaseObject obj)
         {
             obj.SetMemberValue("GCRecord", null);
-            foreach(XPMemberInfo memberInfo in obj.ClassInfo.AssociationListProperties)
+            foreach (XPMemberInfo memberInfo in obj.ClassInfo.AssociationListProperties)
             {
-                XPBaseCollection collection = memberInfo.GetValue(obj) as XPBaseCollection;
+                if (memberInfo.IsManyToMany)
+                {
+                    var objects = obj.Session.GetObjects(memberInfo.IntermediateClass,
+                        CriteriaOperator.And(GetDeletedCriteria(), CriteriaOperator.Or(
+                            new BinaryOperator(nameof(IntermediateObject.LeftIntermediateObjectField), obj),
+                            new BinaryOperator(nameof(IntermediateObject.RightIntermediateObjectField), obj)))
+                        , null, 0, true, true);
 
-                collection.Criteria = GetDeletedCriteria();
-                if (collection != null)
-                    collection.SelectDeleted = true;
+                    foreach (XPBaseObject intermediateObject in objects)
+                        UndeleteObject(intermediateObject);
 
-                foreach (var item in collection.OfType<XPBaseObject>())
-                    UndeleteObject(item);
+                }
+                else
+                {
+                    XPBaseCollection collection = memberInfo.GetValue(obj) as XPBaseCollection;
+
+                    collection.Criteria = GetDeletedCriteria();
+                    if (collection != null)
+                        collection.SelectDeleted = true;
+
+                    foreach (var item in collection.OfType<XPBaseObject>())
+                        UndeleteObject(item);
+                }
             }
         }
     }

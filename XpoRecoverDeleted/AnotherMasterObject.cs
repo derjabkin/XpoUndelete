@@ -2,9 +2,9 @@
 
 namespace XpoRecoverDeleted
 {
-    public class MasterObject : XPObject
+    public class AnotherMasterObject : XPObject
     {
-        public MasterObject(Session session): base (session)
+        public AnotherMasterObject(Session session): base (session)
         {
         }
 
@@ -22,9 +22,7 @@ namespace XpoRecoverDeleted
             }
         }
 
-        [Association, Aggregated]
-        public XPCollection<DetailObject> Details => GetCollection<DetailObject>(nameof(Details));
         [Association]
-        public XPCollection<AnotherMasterObject> AnotherMasters => GetCollection<AnotherMasterObject>(nameof(AnotherMasters));
+        public XPCollection<MasterObject> Masters => GetCollection<MasterObject>(nameof(Masters));
     }
 }
